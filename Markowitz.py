@@ -1,6 +1,7 @@
 """
 Package Import
 """
+
 import yfinance as yf
 import numpy as np
 import pandas as pd
@@ -37,8 +38,8 @@ end = "2024-04-01"
 # Initialize df and df_returns
 df = pd.DataFrame()
 for asset in assets:
-    raw = yf.download(asset, start=start, end=end, auto_adjust = False)
-    df[asset] = raw['Adj Close']
+    raw = yf.download(asset, start=start, end=end, auto_adjust=False)
+    df[asset] = raw["Adj Close"]
 
 df_returns = df.pct_change().fillna(0)
 
@@ -62,7 +63,15 @@ class EqualWeightPortfolio:
         """
         TODO: Complete Task 1 Below
         """
+        # Equal weight for all assets except the excluded one
+        n_assets = len(assets)
+        equal_weight = 1.0 / n_assets
 
+        for asset in assets:
+            self.portfolio_weights[asset] = equal_weight
+
+        # Set excluded asset weight to 0
+        self.portfolio_weights[self.exclude] = 0
         """
         TODO: Complete Task 1 Above
         """
@@ -78,9 +87,7 @@ class EqualWeightPortfolio:
         self.portfolio_returns = df_returns.copy()
         assets = df.columns[df.columns != self.exclude]
         self.portfolio_returns["Portfolio"] = (
-            self.portfolio_returns[assets]
-            .mul(self.portfolio_weights[assets])
-            .sum(axis=1)
+            self.portfolio_returns[assets].mul(self.portfolio_weights[assets]).sum(axis=1)
         )
 
     def get_results(self):
@@ -113,9 +120,20 @@ class RiskParityPortfolio:
         """
         TODO: Complete Task 2 Below
         """
+        # Risk Parity: weight inversely proportional to volatility
+        for i in range(self.lookback + 1, len(df)):
+            # Calculate rolling volatility for each asset
+            returns_window = df_returns[assets].iloc[i - self.lookback : i]
+            volatilities = returns_window.std()
 
+            # Inverse volatility weights
+            inv_vol = 1.0 / volatilities
+            weights = inv_vol / inv_vol.sum()
 
+            self.portfolio_weights.loc[df.index[i], assets] = weights.values
 
+        # Set excluded asset weight to 0
+        self.portfolio_weights[self.exclude] = 0
         """
         TODO: Complete Task 2 Above
         """
@@ -132,9 +150,7 @@ class RiskParityPortfolio:
         self.portfolio_returns = df_returns.copy()
         assets = df.columns[df.columns != self.exclude]
         self.portfolio_returns["Portfolio"] = (
-            self.portfolio_returns[assets]
-            .mul(self.portfolio_weights[assets])
-            .sum(axis=1)
+            self.portfolio_returns[assets].mul(self.portfolio_weights[assets]).sum(axis=1)
         )
 
     def get_results(self):
@@ -167,9 +183,7 @@ class MeanVariancePortfolio:
 
         for i in range(self.lookback + 1, len(df)):
             R_n = df_returns.copy()[assets].iloc[i - self.lookback : i]
-            self.portfolio_weights.loc[df.index[i], assets] = self.mv_opt(
-                R_n, self.gamma
-            )
+            self.portfolio_weights.loc[df.index[i], assets] = self.mv_opt(R_n, self.gamma)
 
         self.portfolio_weights.ffill(inplace=True)
         self.portfolio_weights.fillna(0, inplace=True)
@@ -188,10 +202,20 @@ class MeanVariancePortfolio:
                 TODO: Complete Task 3 Below
                 """
 
-                # Sample Code: Initialize Decision w and the Objective
-                # NOTE: You can modify the following code
-                w = model.addMVar(n, name="w", ub=1)
-                model.setObjective(w.sum(), gp.GRB.MAXIMIZE)
+                # Decision variables: portfolio weights
+                w = model.addMVar(n, name="w", lb=0, ub=1)
+
+                # Objective: maximize mean return - (gamma/2) * variance
+                # w^T * mu - (gamma/2) * w^T * Sigma * w
+                portfolio_return = mu @ w
+                portfolio_variance = w @ Sigma @ w
+
+                model.setObjective(portfolio_return - (gamma / 2) * portfolio_variance, gp.GRB.MAXIMIZE)
+
+                # Constraints
+                # 1. Long-only: w >= 0 (already in variable bounds)
+                # 2. No leverage: sum(w) = 1
+                model.addConstr(w.sum() == 1, name="budget")
 
                 """
                 TODO: Complete Task 3 Above
@@ -200,9 +224,7 @@ class MeanVariancePortfolio:
 
                 # Check if the status is INF_OR_UNBD (code 4)
                 if model.status == gp.GRB.INF_OR_UNBD:
-                    print(
-                        "Model status is INF_OR_UNBD. Reoptimizing with DualReductions set to 0."
-                    )
+                    print("Model status is INF_OR_UNBD. Reoptimizing with DualReductions set to 0.")
                 elif model.status == gp.GRB.INFEASIBLE:
                     # Handle infeasible model
                     print("Model is infeasible.")
@@ -229,9 +251,7 @@ class MeanVariancePortfolio:
         self.portfolio_returns = df_returns.copy()
         assets = df.columns[df.columns != self.exclude]
         self.portfolio_returns["Portfolio"] = (
-            self.portfolio_returns[assets]
-            .mul(self.portfolio_weights[assets])
-            .sum(axis=1)
+            self.portfolio_returns[assets].mul(self.portfolio_weights[assets]).sum(axis=1)
         )
 
     def get_results(self):
@@ -246,9 +266,7 @@ if __name__ == "__main__":
     # Import grading system (protected file in GitHub Classroom)
     from grader import AssignmentJudge
 
-    parser = argparse.ArgumentParser(
-        description="Introduction to Fintech Assignment 3 Part 1"
-    )
+    parser = argparse.ArgumentParser(description="Introduction to Fintech Assignment 3 Part 1")
     """
     NOTE: For Assignment Judge
     """
@@ -270,13 +288,11 @@ if __name__ == "__main__":
         help="Performance for portfolio",
     )
 
-    parser.add_argument(
-        "--report", action="append", help="Report for evaluation metric"
-    )
+    parser.add_argument("--report", action="append", help="Report for evaluation metric")
 
     args = parser.parse_args()
 
     judge = AssignmentJudge()
-    
+
     # All grading logic is protected in grader.py
     judge.run_grading(args)
